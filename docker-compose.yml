@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: refund_engine
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d refund_engine"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - refund_engine_pgdata:/var/lib/postgresql/data
+
+volumes:
+  refund_engine_pgdata:

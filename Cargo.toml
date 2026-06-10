@@ -1,0 +1,25 @@
+[package]
+name = "refund-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Refunds as an explicit, auditable state machine: row-locked over-refund prevention, idempotency done right, hostile webhooks, the 12k incident recovery, and settlement reconciliation."
+license = "MIT"
+
+[lib]
+name = "refund_engine"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "1"
