@@ -14,8 +14,9 @@ use refund_engine::{
     connect_and_migrate, model, recover, request, reset, submit, MockConfig, MockGateway,
 };
 
-const N: usize = 200;
-const KILL_AT: usize = 120; // responses start getting dropped here
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,31 +26,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let gateway = MockGateway::new();
 
-    // Seed ~200 requested refunds, each against its own charge.
-    let mut refund_ids = Vec::with_capacity(N);
-    for _ in 0..N {
+    // Scale is env-tunable; defaults reproduce the documented 200-row run
+    // (kill at 60%, go fully dark at 90%). Set INCIDENT_N=12000 for the
+    // article's "~12k auto-recovered" figure.
+    let n: usize = env_usize("INCIDENT_N", 200);
+    let kill_at: usize = env_usize("INCIDENT_KILL_AT", n * 60 / 100);
+    let never_at: usize = env_usize("INCIDENT_NEVER_AT", n * 90 / 100);
+
+    // Seed n requested refunds, each against its own charge.
+    let mut refund_ids = Vec::with_capacity(n);
+    for _ in 0..n {
         let charge = model::create_charge(&pool, 50_00, "usd").await?;
         let id = request::request_refund(&pool, charge.id, 20_00, "usd", "job:carrier-policy", Some("carrier_guarantee")).await?;
         refund_ids.push(id);
     }
-    println!("seeded {N} requested refunds");
+    println!("seeded {n} requested refunds");
 
     // Batch submit. Partway through, an unrelated deploy SIGKILLs the worker:
     // we model that as the gateway accepting the refund but the response never
     // making it back (drop_response). Some rows never get called at all.
     // Rows [0, KILL_AT)        -> submitted, gateway_ref recorded (clean).
     // Rows [KILL_AT, NEVER_AT)  -> submitted, gateway accepted, response DROPPED.
-    // Rows [NEVER_AT, N)        -> worker dead; never attempted, left 'requested'.
-    const NEVER_AT: usize = KILL_AT + 60;
+    // Rows [never_at, n)        -> worker dead; never attempted, left 'requested'.
     let mut clean = 0;
     let mut dropped = 0;
     let mut never_attempted = 0;
     for (i, id) in refund_ids.iter().enumerate() {
-        if i == KILL_AT {
+        if i == kill_at {
             // The SIGKILL window opens: gateway accepts but drops every response.
             gateway.set_config(MockConfig { drop_response: true, ..Default::default() });
         }
-        if i >= NEVER_AT {
+        if i >= never_at {
             // Worker is fully dead; these rows stay 'requested', never submitted.
             never_attempted += 1;
             continue;
@@ -109,11 +116,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "0 double-refunds across {} recovered ({} rows converged, {} unconverged)",
         report.walked,
-        N as i64 - unconverged.0,
+        n as i64 - unconverged.0,
         unconverged.0
     );
 
-    assert!(issued_after as i64 <= N as i64, "gateway must never issue more than N refunds");
+    assert!(issued_after as i64 <= n as i64, "gateway must never issue more than n refunds");
     assert_eq!(double_refunds, 0, "zero double-refunds");
     assert_eq!(unconverged.0, 0, "every row must converge to a recorded gateway_ref and a known state");
 

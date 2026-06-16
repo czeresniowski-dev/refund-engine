@@ -38,6 +38,28 @@ gateway issued 180 -> 200 refunds across recovery
 OK: 0 double-refunds across 200 recovered; every row converged
 ```
 
+The scale is env-tunable. The article's incident was ~12,000 shipments; the demo
+reproduces that exactly — `INCIDENT_N` seeds that many refunds, SIGKILLs the
+batch at 60%, goes fully dark at 90%, then recovers every row:
+
+```sh
+INCIDENT_N=12000 cargo run --release --example demo_incident
+```
+
+```
+seeded 12000 requested refunds
+batch died: 7200 rows got a recorded gateway_ref, 3600 rows submitted-with-dropped-response, 1200 rows never attempted; gateway has issued 10800 refunds so far
+recovery walked 12000 stuck rows: 10800 already at gateway (left for settle webhook), 1200 resubmitted with the same key
+gateway issued 10800 -> 12000 refunds across recovery
+0 double-refunds across 12000 recovered (12000 rows converged, 0 unconverged)
+OK: 0 double-refunds across 12000 recovered; every row converged
+```
+
+The invariant holds at any scale: the gateway issues each idempotency key at most
+once, so `issued == distinct keys` and the double-refund count is zero. (The
+12,000-row run takes a couple of minutes — it walks every stuck row through the
+real recovery path, no shortcuts.)
+
 Run the rest, and the test suite (DB tests are serial):
 
 ```sh
